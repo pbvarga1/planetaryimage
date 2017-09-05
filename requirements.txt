@@ -2,10 +2,12 @@
 -e .
 
 # Install our development requirements
-flake8
+wheel>=0.23.0
+pep8==1.5.7
+flake8==2.4.1
 pytest
 tox
-wheel==0.23.0
 sphinx
 numpydoc
+matplotlib
 planetary_test_data>=0.3.0

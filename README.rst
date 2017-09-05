@@ -2,8 +2,8 @@
 planetaryimage - Open PDS and Isis CubeFiles in Python
 ======================================================
 
-.. image:: https://img.shields.io/travis/planetarypy/planetaryimage.svg
-        :target: https://travis-ci.org/planetarypy/planetaryimage
+.. image:: https://travis-ci.org/planetarypy/planetaryimage.svg?branch=master
+    :target: https://travis-ci.org/planetarypy/planetaryimage
 
 .. image:: https://img.shields.io/pypi/v/planetaryimage.svg
         :target: https://pypi.python.org/pypi/planetaryimage
@@ -20,6 +20,10 @@ Features
 --------
 
 * Reads in PDS Images as NumPy arrays.
+
+  - Supports GZIP and BZ2 compressed PDS Images.
+  - Supports writing out PDS3 images.
+
 * Reads in Isis Cube Files as NumPy arrays.
 
 Check out a few simple examples of
@@ -67,7 +71,7 @@ the image::
   import matplotlib.pyplot as plt
   from planetaryimage import PDS3Image
   image = PDS3Image.open('1p380322615effbr43p2443l1m1.img')
-  plt.imshow(image.data, cmap='gray')
+  plt.imshow(image.image, cmap='gray')
 
 See `Usage <https://planetaryimage.readthedocs.org/en/latest/usage.html>`_ for
 full documentation on how to use planetaryiamge.

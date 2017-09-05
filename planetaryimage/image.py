@@ -1,21 +1,69 @@
-from six import string_types
-from pvl import load as load_label
-import numpy
+# -*- coding: utf-8 -*-
 import os
-
-try:
-    # Python 3 moved reduce to the functools module
-    from functools import reduce
-except ImportError:
-    # Python 2 reduce is a built-in
-    pass
+import gzip
+import bz2
+import six
+import pvl
+import numpy
 
 
 class PlanetaryImage(object):
+    """A generic image reader. Parent object for PDS3Image and CubeFile
 
-    BAND_STORAGE_TYPE = {
-        'BAND_SEQUENTIAL': '_parse_band_sequential_data'
-    }
+    Parameters
+    ----------
+
+    stream
+        file object to read as an image file
+
+    filename : string
+        an optional filename to attach to the object
+
+    compression : string
+        an optional string that indicate the compression type 'bz2' or 'gz'
+
+    Attributes
+    ----------
+    compression : string
+        Compression type (i.e. 'gz', 'bz2', or None).
+
+    data : numpy array
+        A numpy array representing the image.
+
+    filename : string
+        The filename given.
+
+    label : pvl module
+        The image's label in dictionary form.
+
+    Examples
+    --------
+    >>> from planetaryimage import PDS3Image
+    >>> testfile = 'tests/mission_data/2p129641989eth0361p2600r8m1.img'
+    >>> image = PDS3Image.open(testfile)
+    >>> # Examples of attributes
+    >>> image.bands
+    1
+    >>> image.lines
+    64
+    >>> image.samples
+    64
+    >>> str(image.format)
+    'BAND_SEQUENTIAL'
+    >>> image.data_filename
+    >>> image.dtype
+    dtype('>i2')
+    >>> image.start_byte
+    34304
+    >>> image.shape
+    (1, 64, 64)
+    >>> image.size
+    4096
+
+    See https://planetaryimage.readthedocs.io/en/latest/usage.html to see how
+    to open images to view them and make manipulations.
+
+    """
 
     @classmethod
     def open(cls, filename):
@@ -24,213 +72,116 @@ class PlanetaryImage(object):
         Parameters
         ----------
         filename : string
-            name of file to read as an image file
+            Name of file to read as an image file.  This file may be gzip
+            (``.gz``) or bzip2 (``.bz2``) compressed.
         """
-        with open(filename, 'rb') as fp:
-            return cls(fp, filename)
+        if filename.endswith('.gz'):
+            fp = gzip.open(filename, 'rb')
+            try:
+                return cls(fp, filename, compression='gz')
+            finally:
+                fp.close()
+        elif filename.endswith('.bz2'):
+            fp = bz2.BZ2File(filename, 'rb')
+            try:
+                return cls(fp, filename, compression='bz2')
+            finally:
+                fp.close()
+        else:
+            with open(filename, 'rb') as fp:
+                return cls(fp, filename)
 
-    def __init__(self, stream, filename=None, memory_layout='DISK'):
-        """Create an Image object.
-
-        Parameters
-        ----------
-
-        stream
-            file object to read as an image file
-
-        filename : string
-            an optional filename to attach to the object
-
-        memory_layout : string
-            format of the data that is returned supported values are "IMAGE"
-            and "DISK"
+    def __init__(self, stream_string_or_array, filename=None, compression=None):
         """
-        if isinstance(stream, string_types):
+        Create an Image object.
+        """
+        if isinstance(stream_string_or_array, six.string_types):
             error_msg = (
                 'A file like object is expected for stream. '
                 'Use %s.open(filename) to open a image file.'
             )
             raise TypeError(error_msg % type(self).__name__)
 
-        #: The filename if given, otherwise none.
-        self.filename = filename
+        if isinstance(stream_string_or_array, numpy.ndarray):
+            self.filename = None
+            self.compression = None
+            self.data = stream_string_or_array
+            self.label = self._create_label(stream_string_or_array)
+        else:
+            #: The filename if given, otherwise none.
+            self.filename = filename
 
-        if memory_layout not in ['IMAGE', 'DISK']:
-            raise ValueError('Unsupported memory_layout value.\
-                Expected "IMAGE" or "DISK"')
+            self.compression = compression
 
-        self.memory_layout = memory_layout
+            # TODO: rename to header and add footer?
+            #: The parsed label header in dictionary form.
+            self.label = self._load_label(stream_string_or_array)
 
-        #: The parsed label header in dictionary form.
-        self.label = self._parse_label(stream)
-
-        #: A numpy array representing the image
-        self.data = self._parse_data(stream)
+            #: A numpy array representing the image
+            self.data = self._load_data(stream_string_or_array)
 
     def __repr__(self):
+        # TODO: pick a better repr
         return self.filename
 
-    @staticmethod
-    def get_nested_dict(item, key_list):
-        """Get value from nested dictionary using a key list. """
-        return reduce(lambda x, y: x[y], key_list, item)
+    def save(self, file_to_write=None, overwrite=False):
+        self._save(file_to_write, overwrite)
 
-    def apply_scaling(self, copy=True):
-        """Scale pixel values to there true DN.
+    @property
+    def image(self):
+        """An Image like array of ``self.data`` convenient for image processing tasks
 
-        Parameters
-        ----------
-        copy : boolean
-            whether to apply the scalling to a copy of the pixel data
-            and leave the orginial unaffected
+        * 2D array for single band, grayscale image data
+        * 3D array for three band, RGB image data
 
-        Returns
-        -------
-        scaled_pixel_data
-            a scaled version of the pixel data
+        Enables working with ``self.data`` as if it were a PIL image.
+
+        See https://planetaryimage.readthedocs.io/en/latest/usage.html to see
+        how to open images to view them and make manipulations.
+
         """
-        if copy:
-            return self.multiplier * self.data + self.base
-
-        if self.multiplier != 1:
-            self.data *= self.multiplier
-
-        if self.base != 0:
-            self.data += self.base
-
-        return self.data
-
-    def apply_numpy_specials(self, copy=True):
-        """Convert isis special pixel values to numpy special pixel values.
-
-            =======  =======
-             Isis     Numpy
-            =======  =======
-            Null     nan
-            Lrs      -inf
-            Lis      -inf
-            His      inf
-            Hrs      inf
-            =======  =======
-
-        Parameters
-        ----------
-        copy : boolean
-            whether to apply the new special values to a copy of the
-            pixel data and leave the orginial unaffected
-
-        Returns
-        -------
-        modified_image_data
-            a numpy array with special values converted to numpy's ``nan``,
-            ``inf`` and ``-inf``
-        """
-        if copy:
-            data = self.data.astype(numpy.float64)
-
-        elif self.data.dtype != numpy.float64:
-            data = self.data = self.data.astype(numpy.float64)
-
-        else:
-            data = self.data
-
-        data[data == self.specials['Null']] = numpy.nan
-        data[data < self.specials['Min']] = numpy.NINF
-        data[data > self.specials['Max']] = numpy.inf
-
-        return data
-
-    def specials_mask(self):
-        """Create a pixel map for special pixels.
-
-        Returns
-        -------
-        mask_array
-            an array where the value is `False` if the pixel is special
-            and `True` otherwise
-        """
-        mask = self.data >= self.specials['Min']
-        mask &= self.data <= self.specials['Max']
-        return mask
-
-    def get_image_array(self):
-        """Create an array for use in making an image.
-
-        Creates a linear stretch of the image and scales it to between `0` and
-        `255`. `Null`, `Lis` and `Lrs` pixels are set to `0`. `His` and `Hrs`
-        pixels are set to `255`.
-
-        Usage::
-
-            from pysis import CubeFile
-            from PIL import Image
-
-            # Read in the image and create the image data
-            image = CubeFile.open('test.cub')
-            data = image.get_image_array()
-
-            # Save the first band to a new file
-            Image.fromarray(data[0]).save('test.png')
-
-        Returns
-        -------
-        stretched_array
-            A uint8 array of pixel values.
-        """
-        specials_mask = self.specials_mask()
-        data = self.data.copy()
-
-        data[specials_mask] -= data[specials_mask].min()
-        data[specials_mask] *= 255 / data[specials_mask].max()
-
-        data[data == self.specials['His']] = 255
-        data[data == self.specials['Hrs']] = 255
-
-        return data.astype(numpy.uint8)
+        if self.bands == 1:
+            return self.data.squeeze()
+        elif self.bands == 3:
+            return numpy.dstack(self.data)
+        # TODO: what about multiband images with 2, and 4+ bands?
 
     @property
     def bands(self):
         """Number of image bands."""
-        raise NotImplementedError
+        return self._bands
 
     @property
     def lines(self):
         """Number of lines per band."""
-        raise NotImplementedError
+        return self._lines
 
     @property
     def samples(self):
         """Number of samples per line."""
-        raise NotImplementedError
+        return self._samples
 
     @property
     def format(self):
-        raise NotImplementedError
+        """Image format."""
+        return self._format
 
-    @property
-    def byte_order(self):
-        """Byte order in numpy format('>', '<', '=')."""
-        raise NotImplementedError
+    _data_filename = None
 
     @property
     def data_filename(self):
-        """Return detached filename else None. """
-        return None
-
-    @property
-    def pixel_type(self):
-        """Pixel value type as numpy.dtype. """
-        raise NotImplementedError
+        """Return detached filename else None."""
+        return self._data_filename
 
     @property
     def dtype(self):
-        """Pixel data type. """
-        return self.pixel_type.newbyteorder(self.byte_order)
+        """Pixel data type."""
+        return self._dtype
 
     @property
     def start_byte(self):
         """Index of the start of the image data (zero indexed)."""
-        raise NotImplementedError
+        return self._start_byte
 
     @property
     def shape(self):
@@ -239,47 +190,28 @@ class PlanetaryImage(object):
 
     @property
     def size(self):
+        """Total number of pixels"""
         return self.bands * self.lines * self.samples
 
-    @property
-    def base(self):
-        """An additive factor by which to offset pixel DN."""
-        raise NotImplementedError
+    def _load_label(self, stream):
+        return pvl.load(stream)
 
-    @property
-    def multiplier(self):
-        """A multiplicative factor by which to scale pixel DN."""
-        raise NotImplementedError
+    def _load_data(self, stream):
+        if self.data_filename is not None:
+            return self._load_detached_data()
 
-    def _parse_label(self, stream):
-        return load_label(stream)
+        stream.seek(self.start_byte)
+        return self._decode(stream)
 
-    def _parse_data(self, stream):
-        data_stream = stream
-        try:
-            if self.data_filename is not None:
-                dirpath = os.path.dirname(self.filename)
-                data_file = os.path.abspath(
-                    os.path.join(dirpath, self.data_filename))
+    def create_label(self, array):
+        self._create_label(array)
 
-                data_stream = open(data_file, 'rb')
+    def _decode(self, stream):
+        return self._decoder.decode(stream)
 
-            data_stream.seek(self.start_byte)
-            if self.format in self.BAND_STORAGE_TYPE:
-                return getattr(self, self.BAND_STORAGE_TYPE[self.format])(data_stream)
+    def _load_detached_data(self):
+        dirpath = os.path.dirname(self.filename)
+        filename = os.path.abspath(os.path.join(dirpath, self.data_filename))
 
-            raise Exception('Unkown format (%s)' % self.format)
-
-        finally:
-            data_stream.close()
-
-    def _parse_band_sequential_data(self, stream):
-        data = numpy.fromfile(stream, self.dtype, self.size)
-        data = data.reshape(self.shape)
-        if self.memory_layout == 'IMAGE':
-            if self.bands == 1:
-                return data.squeeze()
-            else:
-                return numpy.dstack((data))
-        else:
-            return data
+        with open(filename, 'rb') as stream:
+            return self._decode(stream)

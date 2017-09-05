@@ -14,14 +14,11 @@ with open('README.rst') as readme_file:
 with open('HISTORY.rst') as history_file:
     history = history_file.read().replace('.. :changelog:', '')
 
-requirements = [
-    # TODO: put package requirements here
-]
 
 setup(
     name='planetaryimage',
-    version='0.2.0',
-    description="Planetary image parser",
+    version='0.4.1',
+    description="Planetary image parser supporting",
     long_description=readme + '\n\n' + history,
     author="PlanetaryPy Developers",
     author_email='contact@planetarypy.com',
@@ -51,5 +48,6 @@ setup(
         'Programming Language :: Python :: 3',
         'Programming Language :: Python :: 3.3',
         'Programming Language :: Python :: 3.4',
+        'Programming Language :: Python :: 3.5',
     ]
 )
