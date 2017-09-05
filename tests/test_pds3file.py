@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 import pytest
 import os
+import shutil
+import tempfile
 import numpy
 from numpy.testing import assert_almost_equal
 from planetaryimage.pds3image import PDS3Image, Pointer
@@ -20,6 +22,19 @@ def expected():
     return numpy.loadtxt(os.path.join(DATA_DIR, 'pds3_1band.txt')).reshape(
         (1, 10, 10)
     )
+
+
+@pytest.fixture
+def temp_image_path():
+    temp_dir = tempfile.mkdtemp()
+    temp_image_path = os.path.join(temp_dir, 'Temp_Image.IMG')
+    try:
+        yield temp_image_path
+    except Exception:
+        pass
+    finally:
+        os.remove(temp_image_path)
+        shutil.rmtree(temp_dir)
 
 
 def test_pds3_1band_labels(expected):
@@ -72,10 +87,10 @@ def test_gz_pds3_1band_labels(expected):
     assert_almost_equal(image.data, expected)
 
 
-def test_image_save():
+def test_image_save(temp_image_path):
     image = PDS3Image.open(filename)
-    image.save('Temp_Image.IMG')
-    new_image = PDS3Image.open('Temp_Image.IMG')
+    image.save(temp_image_path)
+    new_image = PDS3Image.open(temp_image_path)
     assert image.bands == new_image.bands
     assert image.lines == new_image.lines
     assert image.samples == new_image.samples
@@ -92,14 +107,14 @@ def test_image_save():
 
     # Testing .data
     assert image.data.shape == new_image.data.shape
-    assert image.data.dtype == image.data.dtype
-    os.remove('Temp_Image.IMG')
+    assert image.data.dtype == new_image.data.dtype
+    assert_almost_equal(image.data, new_image.data)
 
 
-def test_image_save_overwrite():
+def test_image_save_overwrite(temp_image_path):
     image = PDS3Image.open(filename)
-    image.save('Temp_Image.IMG')
-    image_temp = PDS3Image.open('Temp_Image.IMG')
+    image.save(temp_image_path)
+    image_temp = PDS3Image.open(temp_image_path)
     image_temp.save(overwrite=True)
     new_image = PDS3Image.open(image_temp.filename)
     assert image_temp.filename == new_image.filename
@@ -119,8 +134,8 @@ def test_image_save_overwrite():
 
     # Testing .data
     assert image_temp.data.shape == new_image.data.shape
-    assert image_temp.data.dtype == image.data.dtype
-    os.remove('Temp_Image.IMG')
+    assert image_temp.data.dtype == new_image.data.dtype
+    assert_almost_equal(image.data, new_image.data)
 
 
 def test_image_save_samefile():
@@ -129,65 +144,62 @@ def test_image_save_samefile():
         image.save(image.filename)
 
 
-def test_image_save_lines_linesamples():
+def test_image_save_lines_linesamples(temp_image_path):
     image = PDS3Image.open(filename)
     image.data = image.data[0, 3:8, 3:8]
-    image.save('Temp_Image.IMG')
-    image_temp = PDS3Image.open('Temp_Image.IMG')
+    image.save(temp_image_path)
+    image_temp = PDS3Image.open(temp_image_path)
     assert image_temp.lines == 5
     assert image_temp.samples == 5
-    os.remove('Temp_Image.IMG')
 
 
-def test_image_save_3bands():
+def test_image_save_3bands(temp_image_path):
     image = PDS3Image.open(filename)
     temp_data = numpy.array([image.data, image.data, image.data])
     image.data = temp_data.reshape(3, 10, 10)
-    image.save('Temp_Image.IMG')
-    image_temp = PDS3Image.open('Temp_Image.IMG')
+    image.save(temp_image_path)
+    image_temp = PDS3Image.open(temp_image_path)
     assert image_temp.bands == 3
-    os.remove('Temp_Image.IMG')
 
 
-def test_image_save_1band():
+def test_image_save_1band(temp_image_path):
     image = PDS3Image.open(filename_3bands)
     image.data = image.data[0, :, :]
-    image.save('Temp_Image.IMG')
-    image_temp = PDS3Image.open('Temp_Image.IMG')
+    image.save(temp_image_path)
+    image_temp = PDS3Image.open(temp_image_path)
     assert image_temp.bands == 1
-    os.remove('Temp_Image.IMG')
 
 
-def test_image_save_int_to_float():
+def test_image_save_int_to_float(temp_image_path):
     image = PDS3Image.open(filename)
     ref_image = PDS3Image.open(filename_float)
     image.data = image.data.astype('>f4')
     image.data *= 1.5
-    image.save('Temp_Image.IMG')
-    image_temp = PDS3Image.open('Temp_Image.IMG')
+    image.save(temp_image_path)
+    image_temp = PDS3Image.open(temp_image_path)
     assert image_temp.dtype == ref_image.dtype
     assert_almost_equal(image.data, ref_image.data)
-    os.remove('Temp_Image.IMG')
+    assert_almost_equal(image_temp.data, ref_image.data)
 
 
-def test_image_save_float_to_int():
+def test_image_save_float_to_int(temp_image_path):
     image = PDS3Image.open(filename_float)
     ref_image = PDS3Image.open(filename)
     image.data /= 1.5
     image.data = image.data.astype('>i2')
-    image.save('Temp_Image.IMG')
-    image_temp = PDS3Image.open('Temp_Image.IMG')
+    image.save(temp_image_path)
+    image_temp = PDS3Image.open(temp_image_path)
     assert image_temp.dtype == ref_image.dtype
     assert_almost_equal(image.data, ref_image.data)
-    os.remove('Temp_Image.IMG')
+    assert_almost_equal(image_temp.data, ref_image.data)
 
 
-def test_numpy_array_save_i2():
+def test_numpy_array_save_i2(temp_image_path):
     array = numpy.arange(100, dtype='>i2')
     array = array.reshape(1, 10, 10)
     temp = PDS3Image(array)
-    temp.save('Temp_Image.IMG')
-    image_temp = PDS3Image.open('Temp_Image.IMG')
+    temp.save(temp_image_path)
+    image_temp = PDS3Image.open(temp_image_path)
     assert image_temp.bands == 1
     assert image_temp.lines == 10
     assert image_temp.samples == 10
@@ -196,17 +208,16 @@ def test_numpy_array_save_i2():
     assert image_temp.shape == (1, 10, 10)
     assert image_temp.size == 100
     assert_almost_equal(image_temp.data, array)
-    os.remove('Temp_Image.IMG')
 
 
-def test_numpy_array_save_f4():
+def test_numpy_array_save_f4(temp_image_path):
     array = numpy.arange(100)
     array = array.reshape(1, 10, 10)
     array = array * 1.5
     array = array.astype('>f4')
     temp = PDS3Image(array)
-    temp.save('Temp_Image.IMG')
-    image_temp = PDS3Image.open('Temp_Image.IMG')
+    temp.save(temp_image_path)
+    image_temp = PDS3Image.open(temp_image_path)
     assert image_temp.bands == 1
     assert image_temp.lines == 10
     assert image_temp.samples == 10
@@ -215,7 +226,6 @@ def test_numpy_array_save_f4():
     assert image_temp.shape == (1, 10, 10)
     assert image_temp.size == 100
     assert_almost_equal(image_temp.data, array)
-    os.remove('Temp_Image.IMG')
 
 
 def test_bz2_pds3_1band_labels(expected):
